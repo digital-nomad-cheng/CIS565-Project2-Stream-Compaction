@@ -35,8 +35,16 @@ namespace StreamCompaction {
         int compactWithoutScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            if (n < 1) return -1;
+            int num_nozeros = 0;
+            for (int i = 0; i < n; i++) {
+                if (idata[i] != 0) {
+                    odata[num_nozeros++] = idata[i];
+                    // num_nozeros += 1;
+                }
+            }
             timer().endCpuTimer();
-            return -1;
+            return num_nozeros;
         }
 
         /**

@@ -18,13 +18,32 @@ namespace StreamCompaction {
          * (Optional) For better understanding before starting moving to GPU, you can simulate your GPU scan in this function first.
          */
         void scan(int n, int *odata, const int *idata) {
-            timer().startCpuTimer();
+            // timer().startCpuTimer();
             // TODO
             if (n < 1) return;
             odata[0] = 0;
             for (int i = 1; i < n; i++)
                 odata[i] = odata[i - 1] + idata[i - 1];
-            timer().endCpuTimer();
+            // timer().endCpuTimer();
+        }
+
+        /**
+         * CPU scatter
+         * @returns the number of elements in the result array
+         */
+        int scatter(int n, int* odata, const int* idata, const int* tdata, const int* sdata) {
+            // timer().startCpuTimer();
+            // TODO
+            if (n < 1) return -1;
+            int num_elements = 0;
+            for (int i = 0; i < n; i++) {
+                if (tdata[i] == 1) {
+                    num_elements++;
+                    odata[sdata[i]] = idata[i];
+                }
+            }
+            // timer().endCpuTimer();
+            return num_elements;
         }
 
         /**
@@ -55,8 +74,31 @@ namespace StreamCompaction {
         int compactWithScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            if (n < 1) return -1;
+
+            // map input data into temporary array
+            int* tdata = new int[n]; // temporary array for 0s and 1s
+            for (int i = 0; i < n; i++) {
+                tdata[i] = 0;
+            }
+            for (int i = 0; i < n; i++) {
+                if (idata[i] == 0)
+                    tdata[i] = 0;
+                else
+                    tdata[i] = 1;
+            }
+
+            // perform scan on temporary array
+            int* sdata = new int[n];
+            for (int i = 0; i < n; i++) {
+                sdata[i] = 0;
+            }
+            scan(n, sdata, tdata);
+            
+            // scatter using the result of scan as write index
+            int num_elements = scatter(n, odata, idata, tdata, sdata);
             timer().endCpuTimer();
-            return -1;
+            return num_elements;
         }
     }
 }

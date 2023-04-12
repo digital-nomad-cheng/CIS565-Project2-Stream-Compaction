@@ -52,12 +52,12 @@ namespace StreamCompaction {
         /**
          * Addition on partial sum per block
          */
-        __global__ void add(float* block_sums, float* input, int len) {
+        __global__ void add_kernel(int n, int* dev_odata, const int* dev_idata) {
             int bi = blockIdx.x;
             int ti = threadIdx.x;
             int index = (bi + 1) * blockDim.x + ti;
-            if (index < len) {
-                input[index] += block_sums[bi];
+            if (index < n) {
+                dev_odata[index] += dev_idata[bi];
             }
         }
 
@@ -70,17 +70,38 @@ namespace StreamCompaction {
             cudaMalloc((void**)&dev_idata, sizeof(int) * n);
             cudaMalloc((void**)&dev_odata, sizeof(int) * n);
             cudaMemcpy(dev_idata, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
-
-            dim3 gridDim = { 1, 1, 1 };
+            unsigned int grid_size = (n - 1 + BLOCK_SIZE) / BLOCK_SIZE;
+            dim3 gridDim = { grid_size, 1, 1 };
             dim3 blockDim = { BLOCK_SIZE, 1, 1 };
             timer().startGpuTimer();
             // TODO
+            // step 1 scan into partial prefix-sum for each block
             scan_ks_kernel <<< gridDim, blockDim >>> (n, dev_odata, dev_idata);
+            
+            // step 2 perform scan on the last element in each block
+            int* dev_blockSumsInput;
+            int* host_blockSumsInput;
+            int* dev_blockSumsOutput;
+            // memory allocation
+            host_blockSumsInput = (int*)malloc(grid_size * sizeof(int));
+            cudaMalloc((void**)&dev_blockSumsInput, grid_size * sizeof(int));
+            cudaMalloc((void**)&dev_blockSumsOutput, grid_size * sizeof(int));
+            // memory copy
+            cudaMemcpy(odata, dev_odata, sizeof(int) * n, cudaMemcpyDeviceToHost);
+            for (int i = 0; i < grid_size; i++)
+                host_blockSumsInput[i] = odata[(i + 1) * BLOCK_SIZE - 1];
+            cudaMemcpy(dev_blockSumsInput, host_blockSumsInput, grid_size * sizeof(int), \
+                cudaMemcpyHostToDevice);
+            scan_ks_kernel<<< 1, grid_size >>>(grid_size, dev_blockSumsOutput, \
+                dev_blockSumsInput);
+            // step3 add scanned block prefix-sum i into all values in block i+1
+            add_kernel <<< gridDim, blockDim >>> (n, dev_odata, dev_blockSumsOutput);
             cudaDeviceSynchronize();
             timer().endGpuTimer();
             // since the scan kernel is inclusive, we have to set the first element to 0
             cudaMemcpy(odata+1, dev_odata, sizeof(int) * (n-1), cudaMemcpyDeviceToHost);
             odata[0] = 0;
+
             checkCUDAError("navie scan");
         }
     }

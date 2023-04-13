@@ -72,6 +72,7 @@ namespace StreamCompaction {
                 dev_odata[index + blockDim.x] += dev_idata[bi];
             }
         }
+
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
          */
@@ -128,8 +129,35 @@ namespace StreamCompaction {
         int compact(int n, int *odata, const int *idata) {
             // timer().startGpuTimer();
             // TODO
+            int* dev_idata;
+            int* dev_odata;
+            int* dev_mask;
+            int* host_mask;
+            int* host_sum;
+            int* dev_sum;
+            host_mask = (int*)malloc(sizeof(int) * n);
+            host_sum = (int*)malloc(sizeof(int) * n);
+            cudaMalloc((void**)&dev_idata, sizeof(int) * n);
+            cudaMalloc((void**)&dev_odata, sizeof(int) * n);
+            cudaMalloc((void**)&dev_mask, sizeof(int) * n);
+            cudaMalloc((void**)&dev_sum, sizeof(int) * n);
+            cudaMemcpy(dev_idata, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
+            unsigned int grid_size = (n - 1) / BLOCK_SIZE + 1;
+            dim3 gridDim = { grid_size, 1, 1 };
+            dim3 blockDim = { BLOCK_SIZE, 1, 1 };
+            // step 1
+            StreamCompaction::Common::kernMapToBoolean <<< gridDim, blockDim >>> (n, dev_mask, dev_idata);
+            cudaMemcpy(host_mask, dev_mask, sizeof(int) * n, cudaMemcpyDeviceToHost);
+            
+            // step 2
+            scan(n, host_sum, host_mask);
+
+            // step 3
+            cudaMemcpy(dev_sum, host_sum, sizeof(int) * n, cudaMemcpyHostToDevice);
+            StreamCompaction::Common::kernScatter<<< gridDim, blockDim >>>(n, dev_odata, dev_idata, dev_mask, dev_sum);
+            cudaMemcpy(odata, dev_odata, sizeof(int) * n, cudaMemcpyDeviceToHost);
             // timer().endGpuTimer();
-            return -1;
+            return host_sum[n-1] > n ? n : host_sum[n-1];
         }
     }
 }
